@@ -84,7 +84,7 @@ class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions="""
         You are Alex, a helpful IT assistant for Al Siraat College who communicates through voice.
-                         
+                     
         Voice Communication Guidelines:
         - Speak naturally as you would in a conversation, not like you're reading text
         - Keep responses brief and focused (30-60 words when possible)
@@ -92,22 +92,31 @@ class Assistant(Agent):
         - Avoid long lists, complex numbers, or detailed technical terms unless necessary
         - Use natural transitions and conversational markers
         
-        When users ask questions:
-        - Use the lookup_info function to find relevant information about Al Siraat College
-        - For queries about recent information, include 2025 or 2026 in your search
+        Query Handling Process:
+        1. FIRST, determine if the query is CONTEXTUALLY related to Al Siraat College
+        - Remember that users may ask about "the history" or "the campus" without explicitly mentioning "Al Siraat College"
+        - Since you are an assistant for Al Siraat College, assume general education/school-related queries are about Al Siraat College
+        - Only mark queries as irrelevant if they are clearly about something unrelated to schools or education
+        
+        2. For non-relevant queries (clearly not about education/schools/colleges):
+        - Be friendly and politely explain you can only answer questions about Al Siraat College
+        - Do NOT ask for name, email, or offer to create tickets
+        - Simply invite them to ask a question about the college instead
+        
+        3. For relevant queries (explicitly or implicitly about Al Siraat College):
+        - Use the lookup_info function to find information about Al Siraat College
+        - For recent information, include 2025 or 2026 in your search
         - Respond with only the most essential information
-        - Break complex information into digestible pieces
         
-        Ticket Creation Flow:
-        1. When lookup_info indicates no information is found, you'll receive a response asking for user details
-        2. When the user provides their name and email, use the handle_ticket_creation function
-        3. The function will automatically use the stored query from the class
+        Ticket Creation Flow (ONLY for relevant Al Siraat College queries):
+        1. When lookup_info confirms the query is relevant but indicates no information is found
+        2. Only then ask for the user's name and email to create a ticket
+        3. Once you have both name and email, use handle_ticket_creation
+        4. Inform them you've created a ticket and someone will contact them
         
-        Always keep this mind: 
-        If the user query is relevant to the Al Siraat College but the information is not available and you can't find an answer, then: 
-        - Ask for the user's name and email to create a ticket 
-        - Once you have both name and email, use handle_ticket_creation
-        - Inform them you've created a ticket and someone will contact them
+        IMPORTANT: Never request user information or mention ticket creation unless:
+        1. The query has been confirmed as relevant to Al Siraat College, AND
+        2. The information cannot be found in the knowledge base
         
         Remember: You're having a conversation, not reading a document.
         """,
@@ -116,7 +125,6 @@ class Assistant(Agent):
         tts=openai.TTS(instructions="You are Alex, a helpful assistant with a pleasant, conversational voice. Speak naturally as if having a casual conversation, not reading from a document.",
                        model="gpt-4o-mini-tts")
             )
-        # Add this line to store pending query
         self.pending_ticket_query = None
         
     async def generate_thinking_message(self, query):
@@ -159,22 +167,55 @@ class Assistant(Agent):
     async def lookup_info(self, context: RunContext, query: str):
         logger.info(f"Looking up information for: {query}")
         try:
+            print("query: ", query)
             relevance_check_prompt = f"""
-            Analyze whether this query is relevant to Al Siraat College: "{query}"
-            
-            You MUST respond with ONLY a valid JSON object in this exact format, no backticks or anything else:
+            You are an expert at classifying user queries. Your job is to determine if a query is about Al Siraat College, even when the college name is not explicitly mentioned.
+
+            IMPORTANT CONTEXT: You are an assistant specifically designed for Al Siraat College. Users are speaking to you because they want information about Al Siraat College. You should assume the user is asking about Al Siraat College unless there is strong evidence otherwise.
+
+            Query Classification Rules:
+            - DEFAULT TO RELEVANT: Unless the query is clearly and unambiguously about a non-education topic, assume it's about Al Siraat College
+            - INTERPRET BROADLY: Words like "school", "campus", "staff", "owner", "principal", "teachers", "students", "classes", etc. should be interpreted as referring to Al Siraat College
+            - CONSIDER CONTEXT: Remember that in a conversation about a college, generic questions like "who owns it?", "when was it founded?", "tell me about the history" are about that college
+
+            Examples of RELEVANT queries (should return is_relevant=true):
+            - "Tell me about the owner" (implicit reference to the college owner)
+            - "Who founded it?" (implicit reference to the college)
+            - "What's the address?" (implicit reference to the college location)
+            - "How many students are there?" (implicit reference to the college population)
+            - "What subjects do you teach?" (implicit reference to the college curriculum)
+            - "Is the library open on weekends?" (implicit reference to college facilities)
+            - "When was it established?" (implicit reference to the college founding)
+
+            Examples of NON-RELEVANT queries (should return is_relevant=false):
+            - "What's the best recipe for chocolate cake?"
+            - "How do I fix my car engine?"
+            - "What movies are playing this weekend?"
+            - "Tell me about the history of France"
+
+            The query to classify is: "{query}"
+
+            Rules:
+            - "is_relevant" must be true if:
+            1. The query explicitly mentions Al Siraat College OR
+            2. The query is about a general topic (owner, history, courses, staff, campus, etc.) that could reasonably be about Al Siraat College OR
+            3. The query uses pronouns or context that implies it's asking about Al Siraat College
+            - If false (query is clearly about something else entirely):
+            - "response" should politely explain you can only answer questions about Al Siraat College
+            - Do NOT mention tickets, name, email, or any other topic
+            - If true:
+            - "response" should be an empty string
+
+            BE OPEN-MINDED WITH RELEVANCE - When in doubt, classify as relevant.
+
+            Respond with *only* a valid JSON object in this exact format, no backticks, no extra text:
+
             {{
             "is_relevant": boolean,
-            "response": string
+            "response": string,
+            "reason": string, // explain why you think the query is relevant or not to Al Siraat College.
             }}
-            
-            Where:
-            - "is_relevant" is true ONLY if the query is directly about Al Siraat College
-            - "response" should be a brief, conversational 30-40 word response in a conversational and friendly tone explaining that you can answer questions about Al Siraat College. Invite the user to ask questions about the Al Siraat College. Do not ask for ticket creation, email or username if the query is not relevant to Al Siraat College.(ONLY if is_relevant is false)
-            
-            DO NOT include any other text, explanation, or formatting outside the JSON object.
             """
-            
             result = client.responses.create(
                 model="gpt-4o-mini",
                 input=relevance_check_prompt
@@ -192,7 +233,11 @@ class Assistant(Agent):
                 data = json.loads(raw)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse relevance JSON: {e}")
+                # Default to treating as relevant if parsing fails
+                data = {"is_relevant": True, "response": "", "reason": "JSON parsing failed, defaulting to relevant"}
 
+            reason = data.get("reason", "")
+            print("reason from check relevant prompt: ", reason)
             is_relevant = data.get("is_relevant", False)
             print("is_relevant: ", is_relevant)
             irrelevant_response = data.get("response", "")
@@ -200,71 +245,70 @@ class Assistant(Agent):
 
             if not is_relevant:
                 logger.info("Query not relevant to Al Siraat College")
+                self.pending_ticket_query = None
                 return None, irrelevant_response
             
-            if is_relevant:
-                logger.info("Query is relevant to Al Siraat College")
-                self.pending_ticket_query = query
+            logger.info("Query is relevant to Al Siraat College")
+            self.pending_ticket_query = query
                     
-                thinking_message = await self.generate_thinking_message(query)
-                await self.session.say(thinking_message)
-                print("starting RAG retrieval")
-                docs = retriever.invoke(query)
-                print("RAG retrieval complete")
+            thinking_message = await self.generate_thinking_message(query)
+            await self.session.say(thinking_message)
+            print("starting RAG retrieval")
+            docs = retriever.invoke(query)
+            print("RAG retrieval complete")
+            
+            if not docs:
+                ticket_prompt = f"""
+                The user's query about Al Siraat College couldn't be answered: "{query}"
                 
-                if not docs:
-                    ticket_prompt = f"""
-                    The user's query about Al Siraat College couldn't be answered: "{query}"
-                    
-                    Generate a natural, conversational response that:
-                    1. Acknowledges you couldn't find the information
-                    2. Offers to create a ticket
-                    3. Asks for their name and email
-                    
-                    Keep the response brief and conversational (30-40 words).
-                    """
-                    
-                    response = client.responses.create(
-                        model="gpt-4o-mini",
-                        input=ticket_prompt
-                    )
-                    
-                    self.pending_ticket_query = query
-                    return None, response.output_text
+                Generate a natural, conversational response that:
+                1. Acknowledges you couldn't find the information
+                2. Offers to create a ticket
+                3. Asks for their name and email
                 
-                context = docs[0].page_content
-                print("retrieved context: ", context)
-                    
-                context_prompt = f"""
-                Question: {query}
-                
-                Relevant information:
-                {context}
-                
-                Create a concise, conversational spoken response that directly answers the question.
-                
-                Guidelines for your response:
-                1. Write as you would naturally speak in a conversation
-                2. Keep it brief (30-60 words when possible)
-                3. Focus only on the most important information
-                4. Use simple sentence structure and natural transitions
-                5. Avoid language like "according to" or "the document states"
-                6. Don't mention that you're retrieving or referencing information
-                7. Don't use unpronounceable or special characters in your responses since you communicate through voice.
+                Keep the response brief and conversational (30-40 words).
                 """
                 
                 response = client.responses.create(
                     model="gpt-4o-mini",
-                    input=context_prompt
+                    input=ticket_prompt
                 )
                 
-                print("response: ", response.output_text)
                 return None, response.output_text
+            
+            context = docs[0].page_content
+            print("retrieved context: ", context)
+                
+            context_prompt = f"""
+            Question: {query}
+            
+            Relevant information:
+            {context}
+            
+            Create a concise, conversational spoken response that directly answers the question.
+            
+            Guidelines for your response:
+            1. Write as you would naturally speak in a conversation
+            2. Keep it brief (30-60 words when possible)
+            3. Focus only on the most important information
+            4. Use simple sentence structure and natural transitions
+            5. Avoid language like "according to" or "the document states"
+            6. Don't mention that you're retrieving or referencing information
+            7. Don't use unpronounceable or special characters in your responses since you communicate through voice.
+            """
+            
+            response = client.responses.create(
+                model="gpt-4o-mini",
+                input=context_prompt
+            )
+            
+            print("response: ", response.output_text)
+            return None, response.output_text
                 
         except Exception as e:
             logger.error(f"Error during processing: {e}")
             return None, "Sorry, I'm having trouble finding that information right now."
-            
+  
     @function_tool
     async def handle_ticket_creation(self, context: RunContext, user_name: str, email: str):
         """Handle the ticket creation process after getting user details"""
