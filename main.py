@@ -77,6 +77,7 @@ vectorstore = PineconeVectorStore(
 
 retriever = vectorstore.as_retriever(
                 search_type="similarity",
+                search_kwargs={"k": 3}
             )
 
 
@@ -206,7 +207,7 @@ class Assistant(Agent):
             - If true:
             - "response" should be an empty string
 
-            BE OPEN-MINDED WITH RELEVANCE - When in doubt, classify as relevant.
+            ALways BE OPEN-MINDED WITH RELEVANCE - When in doubt, classify as relevant.
 
             Respond with *only* a valid JSON object in this exact format, no backticks, no extra text:
 
@@ -233,7 +234,6 @@ class Assistant(Agent):
                 data = json.loads(raw)
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse relevance JSON: {e}")
-                # Default to treating as relevant if parsing fails
                 data = {"is_relevant": True, "response": "", "reason": "JSON parsing failed, defaulting to relevant"}
 
             reason = data.get("reason", "")
@@ -275,17 +275,19 @@ class Assistant(Agent):
                 )
                 
                 return None, response.output_text
-            
-            context = docs[0].page_content
-            print("retrieved context: ", context)
+
+
+            combined_context = "\n\n".join([doc.page_content for doc in docs])
+            print("retrieved context: ", combined_context)
                 
             context_prompt = f"""
             Question: {query}
             
             Relevant information:
-            {context}
+            {combined_context}
             
             Create a concise, conversational spoken response that directly answers the question.
+            Take into account ALL of the provided information and synthesize a coherent answer.
             
             Guidelines for your response:
             1. Write as you would naturally speak in a conversation
