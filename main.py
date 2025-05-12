@@ -1,37 +1,26 @@
 import json
-from dotenv import load_dotenv
 import os
 import random
 import logging
 
+from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents.llm import function_tool
 from livekit.agents import AgentSession, Agent, RoomInputOptions, RunContext
 from livekit.plugins import openai, deepgram, silero, noise_cancellation
 from langchain_core.retrievers import BaseRetriever
-from database import TicketDatabase
-
-
-
 from openai import OpenAI
 from openai.types.beta.realtime.session import TurnDetection
 from livekit.plugins.turn_detector.english import EnglishModel
-
 from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import OpenAIEmbeddings
 
+from database import TicketDatabase
+
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("rag-agent")
-
-import aiohttp
-_orig_init = aiohttp.ClientSession.__init__
-
-def _patched_init(self, *args, **kwargs):
-    kwargs.pop('proxy', None)
-    return _orig_init(self, *args, **kwargs)
-
-aiohttp.ClientSession.__init__ = _patched_init
 
 # vad = silero.VAD.load(
 #     # Require stronger signal before calling it "speech"
@@ -207,6 +196,11 @@ class Assistant(Agent):
             - If true:
             - "response" should be an empty string
 
+            IMPORTANT: If the query is asking for general information about Al Siraat College (like "what is Al Siraat?", "tell me about Al Siraat", etc.), 
+            use this information to generate a response:
+            
+           -  Al Siraat College, established in 2009 in Epping, Melbourne, is an independent, co-educational school offering education from Foundation through Year 12 within the Islamic tradition. More than just an academic institution, the College prides itself on fostering a "learning community" where students, families and staff work together to grow and improve. Since opening its doors with around 80 students, Al Siraat has experienced rapid expansion—by 2021 its enrolment neared 1,100, with over half of its students drawn from the immediate northern suburbs. The school's website is organized into sections—including the Principal's Message, School Philosophy, Motto and Emblem, and A Learning Community—that together convey its leadership vision, core values, symbolic identity and communal spirit.
+
             ALways BE OPEN-MINDED WITH RELEVANCE - When in doubt, classify as relevant.
 
             Respond with *only* a valid JSON object in this exact format, no backticks, no extra text:
@@ -215,8 +209,11 @@ class Assistant(Agent):
             "is_relevant": boolean,
             "response": string,
             "reason": string, // explain why you think the query is relevant or not to Al Siraat College.
+            "is_general_query": boolean, // true if the query is asking for general information about Al Siraat College
+            "general_response": string // if is_general_query is true, provide a conversational response using the provided information
             }}
             """
+            
             result = client.responses.create(
                 model="gpt-4o-mini",
                 input=relevance_check_prompt
@@ -242,11 +239,19 @@ class Assistant(Agent):
             print("is_relevant: ", is_relevant)
             irrelevant_response = data.get("response", "")
             print("irrelevant_response: ", irrelevant_response)
-
+            
+            # Check if this is a general query
+            is_general_query = data.get("is_general_query", False)
+            general_response = data.get("general_response", "")
+            
             if not is_relevant:
                 logger.info("Query not relevant to Al Siraat College")
                 self.pending_ticket_query = None
                 return None, irrelevant_response
+            
+            if is_general_query:
+                logger.info("Query is a general question about Al Siraat College")
+                return None, general_response
             
             logger.info("Query is relevant to Al Siraat College")
             self.pending_ticket_query = query
