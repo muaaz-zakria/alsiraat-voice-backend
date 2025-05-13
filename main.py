@@ -82,31 +82,14 @@ class Assistant(Agent):
         - Avoid long lists, complex numbers, or detailed technical terms unless necessary
         - Use natural transitions and conversational markers
         
-        Query Handling Process:
-        1. FIRST, determine if the query is CONTEXTUALLY related to Al Siraat College
-        - Remember that users may ask about "the history" or "the campus" without explicitly mentioning "Al Siraat College"
-        - Since you are an assistant for Al Siraat College, assume general education/school-related queries are about Al Siraat College
-        - Only mark queries as irrelevant if they are clearly about something unrelated to schools or education
-        
-        2. For non-relevant queries (clearly not about education/schools/colleges):
-        - Be friendly and politely explain you can only answer questions about Al Siraat College
-        - Do NOT ask for name, email, or offer to create tickets
-        - Simply invite them to ask a question about the college instead
-        
-        3. For relevant queries (explicitly or implicitly about Al Siraat College):
-        - Use the lookup_info function to find information about Al Siraat College
-        - For recent information, include 2025 or 2026 in your search
-        - Respond with only the most essential information
-        
-        Ticket Creation Flow (ONLY for relevant Al Siraat College queries):
-        1. When lookup_info confirms the query is relevant but indicates no information is found
-        2. Only then ask for the user's name and email to create a ticket
+        Ticket Creation Flow:
+        1. When lookup_info indicates no information is found
+        2. Only ask for the user's name and email to create a ticket
         3. Once you have both name and email, use handle_ticket_creation
         4. Inform them you've created a ticket and someone will contact them
         
         IMPORTANT: Never request user information or mention ticket creation unless:
-        1. The query has been confirmed as relevant to Al Siraat College, AND
-        2. The information cannot be found in the knowledge base
+        1. The information cannot be found in the knowledge base
         
         Remember: You're having a conversation, not reading a document.
         """,
@@ -158,104 +141,64 @@ class Assistant(Agent):
         logger.info(f"Looking up information for: {query}")
         try:
             print("query: ", query)
-            relevance_check_prompt = f"""
-            You are an expert at classifying user queries. Your job is to determine if a query is about Al Siraat College, even when the college name is not explicitly mentioned.
-
-            IMPORTANT CONTEXT: You are an assistant specifically designed for Al Siraat College. Users are speaking to you because they want information about Al Siraat College. You should assume the user is asking about Al Siraat College unless there is strong evidence otherwise.
-
-            Query Classification Rules:
-            - DEFAULT TO RELEVANT: Unless the query is clearly and unambiguously about a non-education topic, assume it's about Al Siraat College
-            - INTERPRET BROADLY: Words like "school", "campus", "staff", "owner", "principal", "teachers", "students", "classes", etc. should be interpreted as referring to Al Siraat College
-            - CONSIDER CONTEXT: Remember that in a conversation about a college, generic questions like "who owns it?", "when was it founded?", "tell me about the history" are about that college
-
-            Examples of RELEVANT queries (should return is_relevant=true):
-            - "Tell me about the owner" (implicit reference to the college owner)
-            - "Who founded it?" (implicit reference to the college)
-            - "What's the address?" (implicit reference to the college location)
-            - "How many students are there?" (implicit reference to the college population)
-            - "What subjects do you teach?" (implicit reference to the college curriculum)
-            - "Is the library open on weekends?" (implicit reference to college facilities)
-            - "When was it established?" (implicit reference to the college founding)
-
-            Examples of NON-RELEVANT queries (should return is_relevant=false):
-            - "What's the best recipe for chocolate cake?"
-            - "How do I fix my car engine?"
-            - "What movies are playing this weekend?"
-            - "Tell me about the history of France"
-
-            The query to classify is: "{query}"
-
-            Rules:
-            - "is_relevant" must be true if:
-            1. The query explicitly mentions Al Siraat College OR
-            2. The query is about a general topic (owner, history, courses, staff, campus, etc.) that could reasonably be about Al Siraat College OR
-            3. The query uses pronouns or context that implies it's asking about Al Siraat College
-            - If false (query is clearly about something else entirely):
-            - "response" should politely explain you can only answer questions about Al Siraat College
-            - Do NOT mention tickets, name, email, or any other topic
-            - If true:
-            - "response" should be an empty string
-
-            IMPORTANT: If the query is asking for general information about Al Siraat College (like "what is Al Siraat?", "tell me about Al Siraat", etc.), 
-            use this information to generate a response:
             
-           -  Al Siraat College, established in 2009 in Epping, Melbourne, is an independent, co-educational school offering education from Foundation through Year 12 within the Islamic tradition. More than just an academic institution, the College prides itself on fostering a "learning community" where students, families and staff work together to grow and improve. Since opening its doors with around 80 students, Al Siraat has experienced rapid expansion—by 2021 its enrolment neared 1,100, with over half of its students drawn from the immediate northern suburbs. The school's website is organized into sections—including the Principal's Message, School Philosophy, Motto and Emblem, and A Learning Community—that together convey its leadership vision, core values, symbolic identity and communal spirit.
+            # Check if this is a general query about Al Siraat College
+            general_query_prompt = f"""
+            Determine if the query is asking for general information about Al Siraat College.
+            
+            Examples of general queries about Al Siraat College:
+            - "What is Al Siraat College?"
+            - "Tell me about Al Siraat"
+            - "What does Al Siraat do?"
+            - "What kind of school is Al Siraat?"
+            - "When was Al Siraat founded?"
+            - "Give me information about Al Siraat College"
+            
+            The query to check is: "{query}"
+            
+            Al Siraat College Information:
+            Al Siraat College, established in 2009 in Epping, Melbourne, is an independent, co-educational school offering education from Foundation through Year 12 within the Islamic tradition. More than just an academic institution, the College prides itself on fostering a "learning community" where students, families and staff work together to grow and improve. Since opening its doors with around 80 students, Al Siraat has experienced rapid expansion—by 2021 its enrolment neared 1,100, with over half of its students drawn from the immediate northern suburbs. The school's website is organized into sections—including the Principal's Message, School Philosophy, Motto and Emblem, and A Learning Community—that together convey its leadership vision, core values, symbolic identity and communal spirit.
 
-            ALways BE OPEN-MINDED WITH RELEVANCE - When in doubt, classify as relevant.
-
-            Respond with *only* a valid JSON object in this exact format, no backticks, no extra text:
-
+            Respond with *only* a valid JSON object in this exact format:
             {{
-            "is_relevant": boolean,
-            "response": string,
-            "reason": string, // explain why you think the query is relevant or not to Al Siraat College.
-            "is_general_query": boolean, // true if the query is asking for general information about Al Siraat College
-            "general_response": string // if is_general_query is true, provide a conversational response using the provided information
+                "is_general_query": boolean, // true if the query is asking for general information about Al Siraat College
+                "general_response": string // if is_general_query is true, provide a conversational response using the provided information about Al Siraat College
             }}
             """
             
             result = client.responses.create(
                 model="gpt-4o-mini",
-                input=relevance_check_prompt
+                input=general_query_prompt
             )
             
             raw = result.output_text.strip()
 
+            # Clean up any markdown formatting
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1]
             if raw.endswith("```"):
                 raw = raw.rsplit("\n", 1)[0]
+            if raw.startswith("json"):
+                raw = raw.split("\n", 1)[1]
             raw = raw.strip()
 
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse relevance JSON: {e}")
-                data = {"is_relevant": True, "response": "", "reason": "JSON parsing failed, defaulting to relevant"}
-
-            reason = data.get("reason", "")
-            print("reason from check relevant prompt: ", reason)
-            is_relevant = data.get("is_relevant", False)
-            print("is_relevant: ", is_relevant)
-            irrelevant_response = data.get("response", "")
-            print("irrelevant_response: ", irrelevant_response)
+                logger.error(f"Failed to parse general query JSON: {e}")
+                # Default to empty object if JSON parsing fails
+                data = {}
             
             # Check if this is a general query
             is_general_query = data.get("is_general_query", False)
             general_response = data.get("general_response", "")
             
-            if not is_relevant:
-                logger.info("Query not relevant to Al Siraat College")
-                self.pending_ticket_query = None
-                return None, irrelevant_response
-            
             if is_general_query:
                 logger.info("Query is a general question about Al Siraat College")
                 return None, general_response
             
-            logger.info("Query is relevant to Al Siraat College")
+            # If not a general query, proceed with RAG
             self.pending_ticket_query = query
-                    
             thinking_message = await self.generate_thinking_message(query)
             await self.session.say(thinking_message)
             print("starting RAG retrieval")
